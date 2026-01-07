@@ -1,0 +1,65 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// TABLAS DEL SISTEMA DE NÓMINA
+
+model Empleado {
+  id           Int      @id @default(autoincrement())
+  cedula       String   @unique
+  nombre       String
+  cargo        String
+  sueldoBase   Float
+  fechaIngreso DateTime
+  nominas      Nomina[]
+}
+
+model Concepto {
+  id          Int             @id @default(autoincrement())
+  nombre      String          // Ej: "Cestaticket", "IVSS"
+  tipo        String          // "ASIGNACION" o "DEDUCCION"
+  modoCalculo String          // "PORCENTAJE" o "FIJO"
+  valor       Float           // Ej: 0.04 (4%) o 40.00 (40$)
+  detalles    DetalleNomina[]
+}
+
+model PeriodoNomina {
+  id                  Int      @id @default(autoincrement())
+  fechaInicio         DateTime
+  fechaFin            DateTime
+  descripcion         String   // Ej: "Primera Quincena Enero"
+  // Banderas de configuración
+  aplicaCestaticket   Boolean  @default(false)
+  aplicaDeduccionesLey Boolean @default(true)
+  
+  nominas             Nomina[]
+}
+
+model Nomina {
+  id           Int             @id @default(autoincrement())
+  empleadoId   Int
+  periodoId    Int
+  totalPagar   Float
+  fechaCalculo DateTime        @default(now())
+  
+  empleado     Empleado        @relation(fields: [empleadoId], references: [id])
+  periodo      PeriodoNomina   @relation(fields: [periodoId], references: [id])
+  detalles     DetalleNomina[]
+}
+
+model DetalleNomina {
+  id         Int      @id @default(autoincrement())
+  nominaId   Int
+  conceptoId Int
+  monto      Float
+  
+  nomina     Nomina   @relation(fields: [nominaId], references: [id])
+  concepto   Concepto @relation(fields: [conceptoId], references: [id])
+}
