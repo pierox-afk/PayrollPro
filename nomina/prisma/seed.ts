@@ -2,7 +2,6 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-// Lista completa extraída de las imágenes de Doña Aurora
 const empleadosDoñaAurora = [
   { nombre: "AMILCAR MORILLO", cedula: "15704205", cargo: "Panadero" },
   { nombre: "EDGAR MORILLO", cedula: "9508834", cargo: "Ayudante" },
@@ -53,7 +52,6 @@ const empleadosDoñaAurora = [
 async function main() {
   console.log("🌱 Sembrando nómina masiva de Doña Aurora...");
 
-  // Crear concepto genérico si no existe
   await prisma.concepto.upsert({
     where: { id: 1 },
     update: {},
@@ -65,16 +63,15 @@ async function main() {
     },
   });
 
-  // Insertar cada empleado
   for (const emp of empleadosDoñaAurora) {
     await prisma.empleado.upsert({
       where: { cedula: emp.cedula },
-      update: { sueldoBase: 5000.0 }, // Actualizamos sueldo a todos
+      update: { sueldoBase: 5000.0 },
       create: {
         cedula: emp.cedula,
         nombre: emp.nombre,
         cargo: emp.cargo,
-        sueldoBase: 5000.0, // Ponemos 5000 para que la deuda no deje el saldo en negativo
+        sueldoBase: 5000.0,
         fechaIngreso: new Date("2024-01-01"),
       },
     });
