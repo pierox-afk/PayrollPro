@@ -50,7 +50,7 @@ app.post("/api/procesar-nomina", upload.single("archivo"), async (req, res) => {
 
       if (!empleado) {
         console.log(
-          `⚠️ Empleado con C.I ${cedulaLimpia} no está en la base de datos.`
+          ` Empleado con C.I ${cedulaLimpia} no está en la base de datos.`
         );
         continue;
       }
@@ -81,7 +81,7 @@ app.post("/api/procesar-nomina", upload.single("archivo"), async (req, res) => {
       });
     }
 
-    console.log(`✅ Procesados ${resultados.length} empleados correctamente.`);
+    console.log(` Procesados ${resultados.length} empleados correctamente.`);
     res.json({ message: "Procesado", procesados: resultados });
   } catch (error) {
     console.error(error);

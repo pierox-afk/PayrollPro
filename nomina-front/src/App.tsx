@@ -24,6 +24,8 @@ interface ResultadoNomina {
   cestaTicket?: number | string;
 }
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+
 function App() {
   const [loading, setLoading] = useState(false);
   const [resultados, setResultados] = useState<ResultadoNomina[]>([]);
@@ -35,10 +37,8 @@ function App() {
   const [overrideCestaPorFila, setOverrideCestaPorFila] =
     useState<boolean>(false);
 
-  // Referencia para el scroll automático (fila de tabla)
   const bottomRef = useRef<HTMLTableRowElement>(null);
 
-  // Scroll al fondo cuando se agrega alguien nuevo
   useEffect(() => {
     if (resultados.length > 0) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -64,7 +64,7 @@ function App() {
       }
 
       const respuesta = await axios.post(
-        "http://localhost:3000/api/procesar-nomina",
+        `${API_URL}/api/procesar-nomina`,
         formData,
         {
           headers: { "Content-Type": "multipart/form-data" },
@@ -89,9 +89,19 @@ function App() {
       setResultados(datosProcesados);
     } catch (err) {
       console.error(err);
-      setError(
-        "No se pudo conectar con el servidor. Verifica que 'npm run dev' esté corriendo en el backend."
-      );
+      let mensaje = "Ocurrió un error inesperado al procesar la nómina.";
+
+      if (axios.isAxiosError(err)) {
+        if (err.response?.data?.error) {
+          mensaje = err.response.data.error;
+        } else if (err.code === "ERR_NETWORK") {
+          mensaje =
+            "No se pudo conectar con el servidor. Verifica que el backend esté encendido y la base de datos accesible.";
+        } else {
+          mensaje = `Error de comunicación: ${err.message}`;
+        }
+      }
+      setError(mensaje);
     } finally {
       setLoading(false);
     }
