@@ -1,0 +1,32 @@
+{
+  "name": "payrollpro-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "dev:nomina": "cd nomina && npm run dev",
+    "dev:front": "cd nomina-front && npm run dev",
+    "electron:dev": "concurrently \"npm:dev:nomina\" \"npm:dev:front\" \"wait-on http://localhost:5173 && electron .\"",
+    "build:front": "cd nomina-front && npm run build",
+    "build": "npm run build:front && electron-builder",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "electron": "^26.2.0",
+    "electron-builder": "^24.6.0",
+    "wait-on": "^7.0.1"
+  },
+  "build": {
+    "appId": "com.pierox.payrollpro",
+    "files": [
+      "electron/**",
+      "nomina-front/dist/**",
+      "nomina/**",
+      "node_modules/**"
+    ],
+    "directories": {
+      "buildResources": "build"
+    }
+  }
+}

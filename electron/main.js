@@ -14,7 +14,8 @@ function createWindow() {
   });
 
   // Cargar la URL de desarrollo
-  win.loadURL('http://localhost:5173/');
+  const startUrl = process.env.ELECTRON_START_URL || (app.isPackaged ? `file://${path.join(__dirname, '..', 'nomina-front', 'dist', 'index.html')}` : 'http://localhost:5173/');
+  win.loadURL(startUrl);
 }
 
 app.whenReady().then(() => {
