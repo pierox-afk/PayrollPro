@@ -162,9 +162,7 @@ function App() {
         [key: string]: unknown;
       }
 
-      const respuesta = await axios.post(`${API_URL}/api/procesar-nomina`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const respuesta = await axios.post(`${API_URL}/api/procesar-nomina`, formData);
 
       const procesados: Procesado[] = (respuesta.data?.procesados ?? []) as Procesado[];
 
