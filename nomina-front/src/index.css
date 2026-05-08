@@ -118,9 +118,10 @@ tbody tr:nth-child(odd) {
   /* Ensure signature line visible and not clipped */
   .signature-line {
     display: block !important;
-    height: 28px !important;
+    /* slightly shorter but pushed down so it's close to the row separator */
+    height: 18px !important;
     border-top: 1px solid #000 !important;
-    margin-top: 18px !important;
+    margin-top: 28px !important;
   }
 
   /* Remove any scrolling containers in print */
