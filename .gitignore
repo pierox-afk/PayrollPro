@@ -10,3 +10,4 @@ nomina-front/node_modules/
 **/node_modules/
 *.local
 .vscode/
+nomina/prisma/dev.db
