@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import axios from "axios";
+import { useState, useRef, useEffect } from 'react';
+import axios from 'axios';
 import {
   Upload,
   Calculator,
@@ -12,7 +12,7 @@ import {
   Plus,
   Trash2,
   FilePlus,
-} from "lucide-react";
+} from 'lucide-react';
 
 interface ResultadoNomina {
   id: string;
@@ -20,11 +20,18 @@ interface ResultadoNomina {
   cedula: string;
   ingresoBase: number | string;
   deudaDescontada: number | string;
+  deudaTotal?: number | string;
   neto: number | string;
   cestaTicket?: number | string;
+  negativoNota?: string;
+  deduccionNegativa?: number | string;
+  bonificacion?: number | string;
+  leyPercent?: number | string;
+  seguroPercent?: number | string;
+  firma?: string;
 }
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 function App() {
   const [loading, setLoading] = useState(false);
@@ -32,18 +39,95 @@ function App() {
   const [error, setError] = useState<string | null>(null);
 
   const [tasaCambio, setTasaCambio] = useState<number | string>(60.0);
-  const [moneda, setMoneda] = useState<"USD" | "VES">("USD");
+  const [moneda, setMoneda] = useState<'USD' | 'VES'>('USD');
   const [cestaticket, setCestaticket] = useState<number | string>(0);
-  const [overrideCestaPorFila, setOverrideCestaPorFila] =
-    useState<boolean>(false);
+  const [overrideCestaPorFila, setOverrideCestaPorFila] = useState<boolean>(false);
+  const [negativoPercent, setNegativoPercent] = useState<number | string>(0);
+  const [negativoNota, setNegativoNota] = useState<string>('');
 
   const bottomRef = useRef<HTMLTableRowElement>(null);
 
   useEffect(() => {
     if (resultados.length > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [resultados.length]);
+
+  // Cargar resultados persistidos desde el backend al iniciar
+  useEffect(() => {
+    const cargar = async () => {
+      try {
+        // Si estamos ejecutando dentro de Electron con la API
+        const anyWin = window as any;
+        if (anyWin?.electron?.loadReport) {
+          const r = await anyWin.electron.loadReport();
+          if (r?.ok && r.data) setResultados(r.data as ResultadoNomina[]);
+          return;
+        }
+
+        // Fallback HTTP
+        const r = await axios.get(`${API_URL}/api/load-report`);
+        if (r.data?.ok && r.data.data) {
+          setResultados(r.data.data as ResultadoNomina[]);
+        }
+      } catch (e) {
+        // ignorar
+      }
+    };
+    cargar();
+  }, []);
+
+  // Fallback adicional: cargar desde localStorage si no hay backend/electron
+  useEffect(() => {
+    try {
+      const anyWin = window as any;
+      // si ya cargó via electron/http, no sobrescribimos; solo cargar si resultados vacío
+      if (anyWin?.electron?.loadReport) return;
+      if (localStorage) {
+        const raw = localStorage.getItem('doa-aurora:resultados');
+        if (raw && !resultados.length) {
+          const parsed = JSON.parse(raw) as ResultadoNomina[];
+          if (Array.isArray(parsed)) setResultados(parsed);
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Guardar en localStorage cada vez que cambian los resultados (persistencia en navegador)
+  useEffect(() => {
+    try {
+      if (localStorage) {
+        localStorage.setItem('doa-aurora:resultados', JSON.stringify(resultados));
+      }
+    } catch (err) {
+      // ignore
+    }
+  }, [resultados]);
+
+  // Guardar resultados antes de cerrar la app (persistencia)
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      try {
+        const anyWin = window as any;
+        if (anyWin?.electron?.saveReport) {
+          await anyWin.electron.saveReport(resultados);
+          return;
+        }
+
+        await axios.post(`${API_URL}/api/save-report`, resultados, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (err) {
+        // ignore
+      }
+    };
+
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [resultados]);
 
   const procesarNomina = async (archivoAProcesar: File) => {
     setLoading(true);
@@ -51,8 +135,11 @@ function App() {
     setError(null);
 
     const formData = new FormData();
-    formData.append("archivo", archivoAProcesar);
-    formData.append("periodoId", "1");
+    formData.append('archivo', archivoAProcesar);
+    formData.append('periodoId', '1');
+    // Campo de % negativo y nota libre
+    formData.append('negativoPercent', String(negativoPercent ?? 0));
+    formData.append('negativoNota', String(negativoNota ?? ''));
 
     try {
       interface Procesado {
@@ -63,16 +150,11 @@ function App() {
         [key: string]: unknown;
       }
 
-      const respuesta = await axios.post(
-        `${API_URL}/api/procesar-nomina`,
-        formData,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-        }
-      );
+      const respuesta = await axios.post(`${API_URL}/api/procesar-nomina`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
 
-      const procesados: Procesado[] = (respuesta.data?.procesados ??
-        []) as Procesado[];
+      const procesados: Procesado[] = (respuesta.data?.procesados ?? []) as Procesado[];
 
       const datosProcesados = procesados.map((item) => {
         const neto = Number(item.neto) || 0;
@@ -83,20 +165,27 @@ function App() {
           ingresoBase: neto + deuda,
           neto,
           deudaDescontada: deuda,
+          deudaTotal: deuda + (Number((item as any).deduccionNegativa) || 0),
+          negativoNota: (item as any).negativoNota || '',
+          deduccionNegativa: (item as any).deduccionNegativa || 0,
+          bonificacion: (item as any).bonificacion || 0,
+          leyPercent: (item as any).leyPercent || 0,
+          seguroPercent: (item as any).seguroPercent || 0,
+          firma: '',
         } as ResultadoNomina;
       });
 
       setResultados(datosProcesados);
     } catch (err) {
       console.error(err);
-      let mensaje = "Ocurrió un error inesperado al procesar la nómina.";
+      let mensaje = 'Ocurrió un error inesperado al procesar la nómina.';
 
       if (axios.isAxiosError(err)) {
         if (err.response?.data?.error) {
           mensaje = err.response.data.error;
-        } else if (err.code === "ERR_NETWORK") {
+        } else if (err.code === 'ERR_NETWORK') {
           mensaje =
-            "No se pudo conectar con el servidor. Verifica que el backend esté encendido y la base de datos accesible.";
+            'No se pudo conectar con el servidor. Verifica que el backend esté encendido y la base de datos accesible.';
         } else {
           mensaje = `Error de comunicación: ${err.message}`;
         }
@@ -117,11 +206,16 @@ function App() {
   const crearNominaVacia = () => {
     const nuevo: ResultadoNomina = {
       id: crypto.randomUUID(),
-      nombre: "Empleado Nuevo",
-      cedula: "",
+      nombre: 'Empleado Nuevo',
+      cedula: '',
       ingresoBase: 0,
       deudaDescontada: 0,
+      deudaTotal: 0,
       neto: 0,
+      bonificacion: 0,
+      leyPercent: 0,
+      seguroPercent: 0,
+      firma: '',
     };
     setResultados([nuevo]);
   };
@@ -129,17 +223,18 @@ function App() {
   const agregarEmpleadoManual = () => {
     const nuevo: ResultadoNomina = {
       id: crypto.randomUUID(),
-      nombre: "",
-      cedula: "",
+      nombre: '',
+      cedula: '',
       ingresoBase: 0,
       deudaDescontada: 0,
+      deudaTotal: 0,
       neto: 0,
     };
     setResultados([...resultados, nuevo]);
   };
 
   const eliminarEmpleado = (id: string) => {
-    if (confirm("¿Eliminar a este empleado?")) {
+    if (confirm('¿Eliminar a este empleado?')) {
       setResultados(resultados.filter((r) => r.id !== id));
     }
   };
@@ -149,20 +244,16 @@ function App() {
   };
 
   // --- LÓGICA DE EDICIÓN ---
-  const actualizarTexto = (
-    id: string,
-    campo: "nombre" | "cedula",
-    valor: string
-  ) => {
+  const actualizarTexto = (id: string, campo: 'nombre' | 'cedula', valor: string) => {
     setResultados((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, [campo]: valor } : item))
+      prev.map((item) => (item.id === id ? { ...item, [campo]: valor } : item)),
     );
   };
 
   const actualizarMonto = (
     id: string,
-    campo: "ingresoBase" | "deudaDescontada" | "neto",
-    valorInput: string
+    campo: 'ingresoBase' | 'deudaDescontada' | 'neto',
+    valorInput: string,
   ) => {
     const nuevosResultados = [...resultados];
     const index = nuevosResultados.findIndex((r) => r.id === id);
@@ -170,8 +261,8 @@ function App() {
 
     const empleado = { ...nuevosResultados[index] };
 
-    if (valorInput === "") {
-      empleado[campo] = "";
+    if (valorInput === '') {
+      empleado[campo] = '';
       nuevosResultados[index] = empleado;
       setResultados(nuevosResultados);
       return;
@@ -183,19 +274,33 @@ function App() {
     const tasa = Number(tasaCambio) || 1;
     let valorEnDolares = valorNumerico;
     // Si estamos en Bs, convertimos a Dólares para guardar
-    if (moneda === "VES") valorEnDolares = valorNumerico / tasa;
+    if (moneda === 'VES') valorEnDolares = valorNumerico / tasa;
 
-    if (campo === "ingresoBase") {
+    if (campo === 'ingresoBase') {
       empleado.ingresoBase = valorEnDolares;
-      const deuda = Number(empleado.deudaDescontada) || 0;
-      empleado.neto = valorEnDolares - deuda;
-    } else if (campo === "deudaDescontada") {
+      const deuda = Number(empleado.deudaTotal ?? empleado.deudaDescontada) || 0;
+      // Recalcular neto considerando cesta, bonificacion y porcentajes
+      const cesta = Number(empleado.cestaTicket) || 0;
+      const bonif = Number(empleado.bonificacion) || 0;
+      const ley = Number(empleado.leyPercent) || 0;
+      const seguro = Number(empleado.seguroPercent) || 0;
+      const leyMonto = valorEnDolares * (ley / 100);
+      const seguroMonto = valorEnDolares * (seguro / 100);
+      empleado.neto = valorEnDolares + cesta + bonif - leyMonto - seguroMonto - deuda;
+    } else if (campo === 'deudaDescontada') {
       empleado.deudaDescontada = valorEnDolares;
+      empleado.deudaTotal = Number(valorEnDolares) + (Number(empleado.deduccionNegativa) || 0);
       const ingreso = Number(empleado.ingresoBase) || 0;
-      empleado.neto = ingreso - valorEnDolares;
-    } else if (campo === "neto") {
+      const cesta = Number(empleado.cestaTicket) || 0;
+      const bonif = Number(empleado.bonificacion) || 0;
+      const ley = Number(empleado.leyPercent) || 0;
+      const seguro = Number(empleado.seguroPercent) || 0;
+      const leyMonto = ingreso * (ley / 100);
+      const seguroMonto = ingreso * (seguro / 100);
+      empleado.neto = ingreso + cesta + bonif - leyMonto - seguroMonto - valorEnDolares;
+    } else if (campo === 'neto') {
       empleado.neto = valorEnDolares;
-      const deuda = Number(empleado.deudaDescontada) || 0;
+      const deuda = Number(empleado.deudaTotal ?? empleado.deudaDescontada) || 0;
       empleado.ingresoBase = valorEnDolares + deuda;
     }
 
@@ -203,24 +308,63 @@ function App() {
     setResultados(nuevosResultados);
   };
 
+  const actualizarDeudaTotal = (id: string, valorInput: string) => {
+    const nuevos = [...resultados];
+    const index = nuevos.findIndex((r) => r.id === id);
+    if (index === -1) return;
+
+    const empleado = { ...nuevos[index] } as any;
+
+    if (valorInput === '') {
+      empleado.deudaTotal = '';
+      empleado.deudaDescontada = '';
+      nuevos[index] = empleado;
+      setResultados(nuevos);
+      return;
+    }
+
+    const valorNumerico = parseFloat(valorInput);
+    if (isNaN(valorNumerico)) return;
+    const tasa = Number(tasaCambio) || 1;
+    const valorUSD = moneda === 'VES' ? valorNumerico / tasa : valorNumerico;
+
+    empleado.deudaTotal = valorUSD;
+    // Para mantener compatibilidad, guardamos el total en deudaDescontada y limpiamos deduccionNegativa
+    empleado.deudaDescontada = valorUSD;
+    empleado.deduccionNegativa = 0;
+
+    const ingreso = Number(empleado.ingresoBase) || 0;
+    const cesta = Number(empleado.cestaTicket) || 0;
+    const bonif = Number(empleado.bonificacion) || 0;
+    const ley = Number(empleado.leyPercent) || 0;
+    const seguro = Number(empleado.seguroPercent) || 0;
+    const leyMonto = ingreso * (Number(ley) / 100);
+    const seguroMonto = ingreso * (Number(seguro) / 100);
+    const deuda = Number(empleado.deudaTotal) || 0;
+    empleado.neto = ingreso + cesta + bonif - leyMonto - seguroMonto - deuda;
+
+    nuevos[index] = empleado;
+    setResultados(nuevos);
+  };
+
   const actualizarCestaTicket = (valorInput: string) => {
-    if (valorInput === "") {
-      setCestaticket("");
+    if (valorInput === '') {
+      setCestaticket('');
       return;
     }
     const valorNumerico = parseFloat(valorInput);
     if (isNaN(valorNumerico)) return;
     const tasa = Number(tasaCambio) || 1;
     // Si la moneda visible es VES, convertimos a USD para guardar
-    const valorUSD = moneda === "VES" ? valorNumerico / tasa : valorNumerico;
+    const valorUSD = moneda === 'VES' ? valorNumerico / tasa : valorNumerico;
     setCestaticket(valorUSD);
   };
 
   const obtenerValorVisual = (valorUSD: number | string) => {
-    if (valorUSD === "") return "";
+    if (valorUSD === '') return '';
     const numero = Number(valorUSD);
     const tasa = Number(tasaCambio) || 1;
-    if (moneda === "USD") return Math.round(numero * 100) / 100;
+    if (moneda === 'USD') return Math.round(numero * 100) / 100;
     return Math.round(numero * tasa * 100) / 100;
   };
 
@@ -237,8 +381,8 @@ function App() {
 
     const empleado = { ...nuevos[index] };
 
-    if (valorInput === "") {
-      empleado.cestaTicket = "";
+    if (valorInput === '') {
+      empleado.cestaTicket = '';
       nuevos[index] = empleado;
       setResultados(nuevos);
       return;
@@ -247,11 +391,92 @@ function App() {
     const valorNumerico = parseFloat(valorInput);
     if (isNaN(valorNumerico)) return;
     const tasa = Number(tasaCambio) || 1;
-    const valorUSD = moneda === "VES" ? valorNumerico / tasa : valorNumerico;
+    const valorUSD = moneda === 'VES' ? valorNumerico / tasa : valorNumerico;
     empleado.cestaTicket = valorUSD;
+
+    // Recalcular neto
+    const ingreso = Number(empleado.ingresoBase) || 0;
+    const bonif = Number(empleado.bonificacion) || 0;
+    const ley = Number(empleado.leyPercent) || 0;
+    const seguro = Number(empleado.seguroPercent) || 0;
+    const deuda = Number(empleado.deudaTotal ?? empleado.deudaDescontada) || 0;
+    const leyMonto = ingreso * (Number(ley) / 100);
+    const seguroMonto = ingreso * (Number(seguro) / 100);
+    empleado.neto = ingreso + valorUSD + bonif - leyMonto - seguroMonto - deuda;
 
     nuevos[index] = empleado;
     setResultados(nuevos);
+  };
+
+  const actualizarBonificacion = (id: string, valorInput: string) => {
+    const nuevos = [...resultados];
+    const index = nuevos.findIndex((r) => r.id === id);
+    if (index === -1) return;
+
+    const empleado = { ...nuevos[index] };
+    if (valorInput === '') {
+      empleado.bonificacion = '';
+      nuevos[index] = empleado;
+      setResultados(nuevos);
+      return;
+    }
+
+    const valorNumerico = parseFloat(valorInput);
+    if (isNaN(valorNumerico)) return;
+    const tasa = Number(tasaCambio) || 1;
+    const valorUSD = moneda === 'VES' ? valorNumerico / tasa : valorNumerico;
+    empleado.bonificacion = valorUSD;
+
+    const ingreso = Number(empleado.ingresoBase) || 0;
+    const cesta = Number(empleado.cestaTicket) || 0;
+    const ley = Number(empleado.leyPercent) || 0;
+    const seguro = Number(empleado.seguroPercent) || 0;
+    const deuda = Number(empleado.deudaTotal ?? empleado.deudaDescontada) || 0;
+    const leyMonto = ingreso * (Number(ley) / 100);
+    const seguroMonto = ingreso * (Number(seguro) / 100);
+    empleado.neto = ingreso + cesta + valorUSD - leyMonto - seguroMonto - deuda;
+
+    nuevos[index] = empleado;
+    setResultados(nuevos);
+  };
+
+  const actualizarPorcentaje = (
+    id: string,
+    campo: 'leyPercent' | 'seguroPercent',
+    valorInput: string,
+  ) => {
+    const nuevos = [...resultados];
+    const index = nuevos.findIndex((r) => r.id === id);
+    if (index === -1) return;
+
+    const empleado = { ...nuevos[index] } as any;
+    if (valorInput === '') {
+      empleado[campo] = '';
+      nuevos[index] = empleado;
+      setResultados(nuevos);
+      return;
+    }
+
+    const valorNumerico = parseFloat(valorInput);
+    if (isNaN(valorNumerico)) return;
+    empleado[campo] = valorNumerico;
+
+    const ingreso = Number(empleado.ingresoBase) || 0;
+    const cesta = Number(empleado.cestaTicket) || 0;
+    const bonif = Number(empleado.bonificacion) || 0;
+    const deuda = Number(empleado.deudaTotal ?? empleado.deudaDescontada) || 0;
+    const ley = Number(empleado.leyPercent) || 0;
+    const seguro = Number(empleado.seguroPercent) || 0;
+    const leyMonto = ingreso * (ley / 100);
+    const seguroMonto = ingreso * (seguro / 100);
+    empleado.neto = ingreso + cesta + bonif - leyMonto - seguroMonto - deuda;
+
+    nuevos[index] = empleado;
+    setResultados(nuevos);
+  };
+
+  const actualizarFirma = (id: string, valor: string) => {
+    setResultados((prev) => prev.map((r) => (r.id === id ? { ...r, firma: valor } : r)));
   };
 
   const totalCesta = overrideCestaPorFila
@@ -259,37 +484,28 @@ function App() {
     : (Number(cestaticket) || 0) * resultados.length;
 
   const totalDolares =
-    resultados.reduce((acc, curr) => acc + (Number(curr.neto) || 0), 0) +
-    totalCesta;
+    resultados.reduce((acc, curr) => acc + (Number(curr.neto) || 0), 0) + totalCesta;
   const totalBolivares = totalDolares * (Number(tasaCambio) || 0);
 
   return (
     <div
       className={`min-h-screen font-sans pb-32 transition-colors duration-500
-      ${
-        moneda === "USD"
-          ? "bg-emerald-50 text-emerald-900"
-          : "bg-blue-50 text-blue-900"
-      }
+      ${moneda === 'USD' ? 'bg-emerald-50 text-emerald-900' : 'bg-blue-50 text-blue-900'}
       print:bg-white print:text-black print:pb-0
     `}
     >
       {/* HEADER */}
       <header
         className="bg-white shadow-md border-b-4 sticky top-0 z-20 transition-colors duration-300 print:hidden"
-        style={{ borderColor: moneda === "USD" ? "#10b981" : "#3b82f6" }}
+        style={{ borderColor: moneda === 'USD' ? '#10b981' : '#3b82f6' }}
       >
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div
-              className={`p-2 rounded-full ${
-                moneda === "USD" ? "bg-emerald-100" : "bg-blue-100"
-              }`}
+              className={`p-2 rounded-full ${moneda === 'USD' ? 'bg-emerald-100' : 'bg-blue-100'}`}
             >
               <Croissant
-                className={`w-6 h-6 ${
-                  moneda === "USD" ? "text-emerald-600" : "text-blue-600"
-                }`}
+                className={`w-6 h-6 ${moneda === 'USD' ? 'text-emerald-600' : 'text-blue-600'}`}
               />
             </div>
             <div>
@@ -300,9 +516,7 @@ function App() {
 
           <div className="flex items-center gap-4 bg-white p-1 rounded-xl shadow-sm border border-gray-200">
             <div className="flex items-center px-3 gap-2 border-r border-gray-200">
-              <span className="text-xs font-bold text-gray-500 uppercase">
-                Tasa:
-              </span>
+              <span className="text-xs font-bold text-gray-500 uppercase">Tasa:</span>
               <div className="relative">
                 <span className="absolute left-1 top-1/2 -translate-y-1/2 text-gray-400 text-xs">
                   Bs
@@ -311,9 +525,7 @@ function App() {
                   type="number"
                   value={tasaCambio}
                   onChange={(e) =>
-                    setTasaCambio(
-                      e.target.value === "" ? "" : parseFloat(e.target.value)
-                    )
+                    setTasaCambio(e.target.value === '' ? '' : parseFloat(e.target.value))
                   }
                   className="w-20 pl-5 py-1 text-sm font-bold text-gray-800 bg-transparent focus:outline-none"
                 />
@@ -321,12 +533,10 @@ function App() {
             </div>
 
             <div className="flex items-center px-3 gap-2 border-r border-gray-200">
-              <span className="text-xs font-bold text-gray-500 uppercase">
-                Cestáticket:
-              </span>
+              <span className="text-xs font-bold text-gray-500 uppercase">Cestáticket:</span>
               <div className="relative">
                 <span className="absolute left-1 top-1/2 -translate-y-1/2 text-gray-400 text-xs">
-                  {moneda === "USD" ? "$" : "Bs"}
+                  {moneda === 'USD' ? '$' : 'Bs'}
                 </span>
                 <input
                   type="number"
@@ -345,26 +555,45 @@ function App() {
                 <input
                   type="checkbox"
                   checked={overrideCestaPorFila}
-                  onChange={() =>
-                    setOverrideCestaPorFila(!overrideCestaPorFila)
-                  }
+                  onChange={() => setOverrideCestaPorFila(!overrideCestaPorFila)}
                 />
                 <span>Editar por fila</span>
               </label>
             </div>
 
+            <div className="flex items-center px-3 gap-2 border-r border-gray-200">
+              <span className="text-xs font-bold text-gray-500 uppercase">% Negativo:</span>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={negativoPercent as any}
+                  onChange={(e) =>
+                    setNegativoPercent(e.target.value === '' ? '' : parseFloat(e.target.value))
+                  }
+                  className="w-20 pl-2 py-1 text-sm font-bold text-gray-800 bg-transparent focus:outline-none"
+                />
+              </div>
+              <input
+                type="text"
+                placeholder="Nota libre"
+                value={negativoNota}
+                onChange={(e) => setNegativoNota(e.target.value)}
+                className="ml-3 px-2 py-1 text-xs bg-white rounded border border-gray-200"
+              />
+            </div>
+
             <button
-              onClick={() => setMoneda(moneda === "USD" ? "VES" : "USD")}
+              onClick={() => setMoneda(moneda === 'USD' ? 'VES' : 'USD')}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all
                 ${
-                  moneda === "USD"
-                    ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                    : "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                  moneda === 'USD'
+                    ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                    : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
                 }
               `}
             >
               <ArrowLeftRight className="w-4 h-4" />
-              {moneda === "USD" ? "USD" : "Bs."}
+              {moneda === 'USD' ? 'USD' : 'Bs.'}
             </button>
 
             <button
@@ -380,25 +609,19 @@ function App() {
 
       {/* HEADER IMPRESIÓN */}
       <div className="hidden print:block text-center pt-8 pb-4 border-b-2 border-gray-300 mb-6">
-        <h1 className="text-3xl font-bold text-gray-800 uppercase">
-          Panadería Doña Aurora C.A.
-        </h1>
-        <p className="text-gray-600">
-          Reporte de Nómina - {new Date().toLocaleDateString()}
-        </p>
+        <h1 className="text-3xl font-bold text-gray-800 uppercase">Panadería Doña Aurora C.A.</h1>
+        <p className="text-gray-600">Reporte de Nómina - {new Date().toLocaleDateString()}</p>
         <p className="text-sm mt-2">
           Tasa aplicada: <b>{Number(tasaCambio).toFixed(2)} Bs/$</b>
         </p>
         <p className="text-sm mt-2">
-          Cesta Ticket por empleado:{" "}
+          Cesta Ticket por empleado:{' '}
           <b>
             {overrideCestaPorFila
-              ? "Variable (ver tabla)"
-              : moneda === "USD"
-              ? `$ ${Number(cestaticket).toFixed(2)}`
-              : `Bs ${(
-                  Number(cestaticket || 0) * (Number(tasaCambio) || 1)
-                ).toFixed(2)}`}
+              ? 'Variable (ver tabla)'
+              : moneda === 'USD'
+                ? `$ ${Number(cestaticket).toFixed(2)}`
+                : `Bs ${(Number(cestaticket || 0) * (Number(tasaCambio) || 1)).toFixed(2)}`}
           </b>
         </p>
       </div>
@@ -409,7 +632,7 @@ function App() {
           <div className="bg-white rounded-xl shadow-lg p-10 text-center max-w-xl mx-auto mt-10 border border-gray-100 print:hidden">
             <Calculator
               className={`w-16 h-16 mx-auto mb-4 ${
-                moneda === "USD" ? "text-emerald-400" : "text-blue-400"
+                moneda === 'USD' ? 'text-emerald-400' : 'text-blue-400'
               }`}
             />
             <h2 className="text-2xl font-bold mb-6">Cargar Nómina</h2>
@@ -426,18 +649,14 @@ function App() {
                 <button
                   className={`w-full px-8 py-4 rounded-xl text-white font-bold shadow-md active:scale-95 transition-all flex items-center justify-center gap-2
                     ${
-                      moneda === "USD"
-                        ? "bg-emerald-500 hover:bg-emerald-600"
-                        : "bg-blue-500 hover:bg-blue-600"
+                      moneda === 'USD'
+                        ? 'bg-emerald-500 hover:bg-emerald-600'
+                        : 'bg-blue-500 hover:bg-blue-600'
                     }
                   `}
                 >
-                  {loading ? (
-                    <Loader2 className="animate-spin" />
-                  ) : (
-                    <Upload className="w-5 h-5" />
-                  )}
-                  {loading ? "Procesando..." : "Subir Archivo Excel"}
+                  {loading ? <Loader2 className="animate-spin" /> : <Upload className="w-5 h-5" />}
+                  {loading ? 'Procesando...' : 'Subir Archivo Excel'}
                 </button>
               </div>
 
@@ -473,15 +692,13 @@ function App() {
             <div
               className={`px-6 py-3 border-b flex justify-between items-center print:hidden
                ${
-                 moneda === "USD"
-                   ? "bg-emerald-50 border-emerald-100"
-                   : "bg-blue-50 border-blue-100"
+                 moneda === 'USD'
+                   ? 'bg-emerald-50 border-emerald-100'
+                   : 'bg-blue-50 border-blue-100'
                }
             `}
             >
-              <h3 className="font-bold text-lg">
-                Empleados ({resultados.length})
-              </h3>
+              <h3 className="font-bold text-lg">Empleados ({resultados.length})</h3>
               <button
                 onClick={agregarEmpleadoManual}
                 className="text-xs flex items-center gap-1 bg-white px-3 py-1.5 rounded border border-gray-300 hover:bg-gray-50 text-gray-700 shadow-sm font-semibold transition-all active:scale-95"
@@ -490,7 +707,7 @@ function App() {
               </button>
             </div>
 
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto print:overflow-visible print:overflow-y-visible">
               <table className="w-full text-left print:text-sm">
                 <thead className="bg-gray-50 text-gray-500 text-xs uppercase font-bold tracking-wider print:bg-white print:text-black print:border-b-2 print:border-black">
                   <tr>
@@ -498,16 +715,25 @@ function App() {
                     <th className="px-4 py-3 text-center w-32 bg-gray-100/50 print:bg-transparent">
                       Ingreso Base
                     </th>
-                    <th className="px-4 py-3 text-center w-32 bg-red-50/50 text-red-700 print:bg-transparent print:text-black">
-                      Deuda
-                    </th>
                     <th className="px-4 py-3 text-center w-28 bg-yellow-50/50 text-yellow-700 print:bg-transparent print:text-black">
                       Cesta Ticket
                     </th>
-                    <th className="px-4 py-3 text-right w-40 bg-green-50/50 text-green-700 print:bg-transparent print:text-black">
-                      Total ({moneda === "USD" ? "$" : "Bs"})
+                    <th className="px-4 py-3 text-center w-28 bg-yellow-50/50 text-yellow-700 print:bg-transparent print:text-black">
+                      Bonificación
                     </th>
-                    <th className="px-4 py-3 w-10 print:hidden"></th>
+                    <th className="px-4 py-3 text-center w-36 bg-red-50/50 text-red-700 print:bg-transparent print:text-black">
+                      Ley Pol. Habitacional (%)
+                    </th>
+                    <th className="px-4 py-3 text-center w-36 bg-red-50/50 text-red-700 print:bg-transparent print:text-black">
+                      Seguro Social (%)
+                    </th>
+                    <th className="px-4 py-3 text-center w-32 bg-red-50/50 text-red-700 print:bg-transparent print:text-black">
+                      Deuda Total
+                    </th>
+                    <th className="px-4 py-3 text-right w-40 bg-green-50/50 text-green-700 print:bg-transparent print:text-black">
+                      Total ({moneda === 'USD' ? '$' : 'Bs'})
+                    </th>
+                    <th className="px-4 py-3 w-40 print:table-cell">Firma</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm print:divide-gray-300">
@@ -515,6 +741,7 @@ function App() {
                     <tr
                       key={item.id}
                       className="hover:bg-gray-50 transition-colors group print:hover:bg-transparent"
+                      style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2 mb-1">
@@ -523,18 +750,14 @@ function App() {
                             type="text"
                             value={item.nombre}
                             placeholder="Nombre del Empleado"
-                            onChange={(e) =>
-                              actualizarTexto(item.id, "nombre", e.target.value)
-                            }
+                            onChange={(e) => actualizarTexto(item.id, 'nombre', e.target.value)}
                             className="font-bold text-gray-800 bg-transparent border-b border-transparent focus:border-blue-400 focus:outline-none w-full placeholder-gray-300 print:placeholder-transparent"
                           />
                         </div>
                         <input
                           type="text"
                           value={item.cedula}
-                          onChange={(e) =>
-                            actualizarTexto(item.id, "cedula", e.target.value)
-                          }
+                          onChange={(e) => actualizarTexto(item.id, 'cedula', e.target.value)}
                           placeholder="Cédula / ID"
                           className="text-xs text-gray-500 font-mono ml-6 bg-transparent focus:outline-none w-full placeholder-gray-300 print:text-gray-600 print:ml-0 print:block"
                         />
@@ -544,37 +767,9 @@ function App() {
                         <input
                           type="number"
                           value={obtenerValorVisual(item.ingresoBase)}
-                          onChange={(e) =>
-                            actualizarMonto(
-                              item.id,
-                              "ingresoBase",
-                              e.target.value
-                            )
-                          }
+                          onChange={(e) => actualizarMonto(item.id, 'ingresoBase', e.target.value)}
                           placeholder="0"
                           className="w-full p-2 text-center font-bold text-gray-600 bg-gray-50 border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-gray-300 print:bg-transparent print:border-none print:text-right"
-                        />
-                      </td>
-
-                      <td className="px-2 py-2">
-                        <input
-                          type="number"
-                          value={obtenerValorVisual(item.deudaDescontada)}
-                          onChange={(e) =>
-                            actualizarMonto(
-                              item.id,
-                              "deudaDescontada",
-                              e.target.value
-                            )
-                          }
-                          placeholder="0"
-                          className={`w-full p-2 text-center font-bold rounded border focus:outline-none focus:ring-2 print:bg-transparent print:border-none print:text-right print:text-black
-                            ${
-                              moneda === "USD"
-                                ? "text-red-600 bg-red-50 border-red-100 focus:ring-red-200"
-                                : "text-orange-600 bg-orange-50 border-orange-100 focus:ring-orange-200"
-                            }
-                          `}
                         />
                       </td>
 
@@ -583,21 +778,13 @@ function App() {
                           <div className="flex items-center">
                             <input
                               type="number"
-                              value={obtenerValorVisual(item.cestaTicket ?? "")}
-                              onChange={(e) =>
-                                actualizarCestaPorEmpleado(
-                                  item.id,
-                                  e.target.value
-                                )
-                              }
+                              value={obtenerValorVisual(item.cestaTicket ?? '')}
+                              onChange={(e) => actualizarCestaPorEmpleado(item.id, e.target.value)}
                               placeholder="0"
                               className={`w-full p-2 text-center font-bold rounded border focus:outline-none focus:ring-2 print:bg-transparent print:border-none print:text-right print:text-black text-yellow-700 bg-yellow-50 border-yellow-100 focus:ring-yellow-200`}
                             />
-                            {Number(item.cestaTicket ?? cestaticket) !==
-                              Number(cestaticket) && (
-                              <span className="ml-2 text-xs text-yellow-700">
-                                *
-                              </span>
+                            {Number(item.cestaTicket ?? cestaticket) !== Number(cestaticket) && (
+                              <span className="ml-2 text-xs text-yellow-700">*</span>
                             )}
                           </div>
                         ) : (
@@ -614,29 +801,87 @@ function App() {
                       <td className="px-2 py-2">
                         <input
                           type="number"
+                          value={obtenerValorVisual(item.bonificacion ?? 0)}
+                          onChange={(e) => actualizarBonificacion(item.id, e.target.value)}
+                          placeholder="0"
+                          className={`w-full p-2 text-center font-bold rounded border focus:outline-none focus:ring-2 print:bg-transparent print:border-none print:text-right print:text-black text-yellow-700 bg-yellow-50 border-yellow-100 focus:ring-yellow-200`}
+                        />
+                      </td>
+
+                      <td className="px-2 py-2">
+                        <div className="flex flex-col">
+                          <input
+                            type="number"
+                            value={String(item.leyPercent ?? 0)}
+                            onChange={(e) =>
+                              actualizarPorcentaje(item.id, 'leyPercent', e.target.value)
+                            }
+                            placeholder="%"
+                            className={`w-full p-2 text-center font-bold rounded border focus:outline-none focus:ring-2 print:bg-transparent print:border-none print:text-right print:text-black text-red-600 bg-red-50 border-red-100 focus:ring-red-200`}
+                          />
+                          <span className="text-xs text-red-600 mt-1 calculated-note">
+                            Calculado
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-2 py-2">
+                        <div className="flex flex-col">
+                          <input
+                            type="number"
+                            value={String(item.seguroPercent ?? 0)}
+                            onChange={(e) =>
+                              actualizarPorcentaje(item.id, 'seguroPercent', e.target.value)
+                            }
+                            placeholder="%"
+                            className={`w-full p-2 text-center font-bold rounded border focus:outline-none focus:ring-2 print:bg-transparent print:border-none print:text-right print:text-black text-red-600 bg-red-50 border-red-100 focus:ring-red-200`}
+                          />
+                          <span className="text-xs text-red-600 mt-1 calculated-note">
+                            Calculado
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-2 py-2">
+                        <input
+                          type="number"
+                          value={obtenerValorVisual(
+                            item.deudaTotal ??
+                              Number(item.deudaDescontada || 0) +
+                                Number(item.deduccionNegativa || 0),
+                          )}
+                          onChange={(e) => actualizarDeudaTotal(item.id, e.target.value)}
+                          placeholder="0"
+                          className={`w-full p-2 text-center font-bold rounded border focus:outline-none focus:ring-2 print:bg-transparent print:border-none print:text-right print:text-black text-red-600 bg-red-50 border-red-100 focus:ring-red-200`}
+                        />
+                      </td>
+
+                      <td className="px-2 py-2 pr-16 print:pr-28">
+                        <input
+                          type="number"
                           value={obtenerValorVisual(item.neto)}
-                          onChange={(e) =>
-                            actualizarMonto(item.id, "neto", e.target.value)
-                          }
+                          onChange={(e) => actualizarMonto(item.id, 'neto', e.target.value)}
                           placeholder="0"
                           className={`w-full p-2 text-right font-bold text-lg rounded border focus:outline-none focus:ring-2 print:bg-transparent print:border-none print:text-black print:text-base
                             ${
-                              moneda === "USD"
-                                ? "text-emerald-700 bg-emerald-50 border-emerald-100 focus:ring-emerald-200"
-                                : "text-blue-700 bg-blue-50 border-blue-100 focus:ring-blue-200"
+                              moneda === 'USD'
+                                ? 'text-emerald-700 bg-emerald-50 border-emerald-100 focus:ring-emerald-200'
+                                : 'text-blue-700 bg-blue-50 border-blue-100 focus:ring-blue-200'
                             }
                           `}
                         />
                       </td>
 
-                      <td className="px-2 py-2 text-center print:hidden">
-                        <button
-                          onClick={() => eliminarEmpleado(item.id)}
-                          className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"
-                          title="Eliminar fila"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                      <td className="px-2 py-2 text-center">
+                        {/* Input visible on screen, hidden in print. In print we show a blank signature line below. */}
+                        <input
+                          type="text"
+                          value={item.firma || ''}
+                          onChange={(e) => actualizarFirma(item.id, e.target.value)}
+                          placeholder="Firma"
+                          className="w-full p-2 text-sm text-center border border-dashed border-gray-300 rounded bg-white print:hidden"
+                        />
+                        <div className="hidden print:block signature-line"></div>
                       </td>
                     </tr>
                   ))}
@@ -669,8 +914,8 @@ function App() {
                   Total USD
                 </p>
                 <p className="text-2xl font-bold text-emerald-600 print:text-black">
-                  ${" "}
-                  {totalDolares.toLocaleString("en-US", {
+                  ${' '}
+                  {totalDolares.toLocaleString('en-US', {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -681,8 +926,8 @@ function App() {
                   Total VES
                 </p>
                 <p className="text-2xl font-bold text-blue-600 print:text-black">
-                  Bs{" "}
-                  {totalBolivares.toLocaleString("es-VE", {
+                  Bs{' '}
+                  {totalBolivares.toLocaleString('es-VE', {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -690,12 +935,10 @@ function App() {
                 <p className="text-xs text-gray-400 mt-1 print:text-black">
                   * Incluye cesta ticket por empleado (
                   {overrideCestaPorFila
-                    ? "Variable (ver tabla)"
-                    : moneda === "USD"
-                    ? `$ ${Number(cestaticket).toFixed(2)}`
-                    : `Bs ${(
-                        Number(cestaticket || 0) * (Number(tasaCambio) || 1)
-                      ).toFixed(2)}`}
+                    ? 'Variable (ver tabla)'
+                    : moneda === 'USD'
+                      ? `$ ${Number(cestaticket).toFixed(2)}`
+                      : `Bs ${(Number(cestaticket || 0) * (Number(tasaCambio) || 1)).toFixed(2)}`}
                   )
                 </p>
               </div>

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+.nomina/
+*.log
+.env
+nomina/dev.db
+nomina/data/
+nomina-front/node_modules/
+**/node_modules/
+*.local
+.vscode/
