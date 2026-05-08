@@ -33,6 +33,12 @@ interface ResultadoNomina {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+// Tipos para la API expuesta por Electron (si aplica)
+type ElectronLoadResult = { ok: boolean; data: ResultadoNomina[] | null };
+type ElectronAPI = {
+  loadReport?: () => Promise<ElectronLoadResult>;
+  saveReport?: (data: ResultadoNomina[]) => Promise<{ ok: boolean }>;
+};
 function App() {
   const [loading, setLoading] = useState(false);
   const [resultados, setResultados] = useState<ResultadoNomina[]>([]);
@@ -58,9 +64,9 @@ function App() {
     const cargar = async () => {
       try {
         // Si estamos ejecutando dentro de Electron con la API
-        const anyWin = window as any;
-        if (anyWin?.electron?.loadReport) {
-          const r = await anyWin.electron.loadReport();
+        const win = window as unknown as { electron?: ElectronAPI };
+        if (win?.electron?.loadReport) {
+          const r = await win.electron.loadReport();
           if (r?.ok && r.data) setResultados(r.data as ResultadoNomina[]);
           return;
         }
@@ -70,7 +76,7 @@ function App() {
         if (r.data?.ok && r.data.data) {
           setResultados(r.data.data as ResultadoNomina[]);
         }
-      } catch (e) {
+      } catch {
         // ignorar
       }
     };
@@ -80,9 +86,9 @@ function App() {
   // Fallback adicional: cargar desde localStorage si no hay backend/electron
   useEffect(() => {
     try {
-      const anyWin = window as any;
+      const win = window as unknown as { electron?: ElectronAPI };
       // si ya cargó via electron/http, no sobrescribimos; solo cargar si resultados vacío
-      if (anyWin?.electron?.loadReport) return;
+      if (win?.electron?.loadReport) return;
       if (localStorage) {
         const raw = localStorage.getItem('doa-aurora:resultados');
         if (raw && !resultados.length) {
@@ -90,7 +96,7 @@ function App() {
           if (Array.isArray(parsed)) setResultados(parsed);
         }
       }
-    } catch (err) {
+    } catch {
       // ignore
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -102,25 +108,25 @@ function App() {
       if (localStorage) {
         localStorage.setItem('doa-aurora:resultados', JSON.stringify(resultados));
       }
-    } catch (err) {
+    } catch {
       // ignore
     }
   }, [resultados]);
 
   // Guardar resultados antes de cerrar la app (persistencia)
   useEffect(() => {
-    const handler = async (e: Event) => {
+    const handler = async () => {
       try {
-        const anyWin = window as any;
-        if (anyWin?.electron?.saveReport) {
-          await anyWin.electron.saveReport(resultados);
+        const win = window as unknown as { electron?: ElectronAPI };
+        if (win?.electron?.saveReport) {
+          await win.electron.saveReport(resultados);
           return;
         }
 
         await axios.post(`${API_URL}/api/save-report`, resultados, {
           headers: { 'Content-Type': 'application/json' },
         });
-      } catch (err) {
+      } catch {
         // ignore
       }
     };
@@ -147,6 +153,12 @@ function App() {
         cedula?: string;
         neto?: number | string;
         deudaDescontada?: number | string;
+        deduccionNegativa?: number | string;
+        negativoNota?: string;
+        bonificacion?: number | string;
+        leyPercent?: number | string;
+        seguroPercent?: number | string;
+        cestaTicket?: number | string;
         [key: string]: unknown;
       }
 
@@ -159,18 +171,19 @@ function App() {
       const datosProcesados = procesados.map((item) => {
         const neto = Number(item.neto) || 0;
         const deuda = Number(item.deudaDescontada) || 0;
+        const deduccionNegativa = Number(item.deduccionNegativa) || 0;
         return {
           ...item,
           id: crypto.randomUUID(), // ID único seguro
           ingresoBase: neto + deuda,
           neto,
           deudaDescontada: deuda,
-          deudaTotal: deuda + (Number((item as any).deduccionNegativa) || 0),
-          negativoNota: (item as any).negativoNota || '',
-          deduccionNegativa: (item as any).deduccionNegativa || 0,
-          bonificacion: (item as any).bonificacion || 0,
-          leyPercent: (item as any).leyPercent || 0,
-          seguroPercent: (item as any).seguroPercent || 0,
+          deudaTotal: deuda + deduccionNegativa,
+          negativoNota: item.negativoNota || '',
+          deduccionNegativa: deduccionNegativa,
+          bonificacion: Number(item.bonificacion) || 0,
+          leyPercent: Number(item.leyPercent) || 0,
+          seguroPercent: Number(item.seguroPercent) || 0,
           firma: '',
         } as ResultadoNomina;
       });
@@ -313,7 +326,7 @@ function App() {
     const index = nuevos.findIndex((r) => r.id === id);
     if (index === -1) return;
 
-    const empleado = { ...nuevos[index] } as any;
+    const empleado = { ...nuevos[index] } as ResultadoNomina;
 
     if (valorInput === '') {
       empleado.deudaTotal = '';
@@ -449,7 +462,7 @@ function App() {
     const index = nuevos.findIndex((r) => r.id === id);
     if (index === -1) return;
 
-    const empleado = { ...nuevos[index] } as any;
+    const empleado = { ...nuevos[index] } as ResultadoNomina;
     if (valorInput === '') {
       empleado[campo] = '';
       nuevos[index] = empleado;
@@ -566,7 +579,7 @@ function App() {
               <div className="relative">
                 <input
                   type="number"
-                  value={negativoPercent as any}
+                  value={negativoPercent}
                   onChange={(e) =>
                     setNegativoPercent(e.target.value === '' ? '' : parseFloat(e.target.value))
                   }
@@ -753,6 +766,13 @@ function App() {
                             onChange={(e) => actualizarTexto(item.id, 'nombre', e.target.value)}
                             className="font-bold text-gray-800 bg-transparent border-b border-transparent focus:border-blue-400 focus:outline-none w-full placeholder-gray-300 print:placeholder-transparent"
                           />
+                          <button
+                            onClick={() => eliminarEmpleado(item.id)}
+                            className="ml-2 text-red-500 hover:text-red-700 print:hidden"
+                            aria-label="Eliminar empleado"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
                         <input
                           type="text"
