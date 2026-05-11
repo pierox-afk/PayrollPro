@@ -28,12 +28,12 @@ jobs:
             ${{ runner.os }}-node-
 
       - name: Install root deps
-        run: npm ci
+        run: npm install
 
       - name: Install backend and frontend deps
         run: |
-          cd nomina && npm ci
-          cd ../nomina-front && npm ci
+          cd nomina && npm install
+          cd ../nomina-front && npm install
 
       - name: Build frontend
         run: |
