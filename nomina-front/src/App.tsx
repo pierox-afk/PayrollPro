@@ -13,6 +13,8 @@ import {
   Trash2,
   FilePlus,
 } from 'lucide-react';
+import AdminPanel from './admin/AdminPanel';
+import LoginPanel from './admin/LoginPanel';
 
 interface ResultadoNomina {
   id: string;
@@ -40,6 +42,8 @@ type ElectronAPI = {
   saveReport?: (data: ResultadoNomina[]) => Promise<{ ok: boolean }>;
 };
 function App() {
+  const [isAdmin, setIsAdmin] = useState<boolean>(() => !!localStorage.getItem('admin:logged'));
+  const [showLogin, setShowLogin] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resultados, setResultados] = useState<ResultadoNomina[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -617,6 +621,25 @@ function App() {
           </div>
         </div>
       </header>
+
+      {/* Admin area (login / panel) */}
+      <div className="max-w-7xl mx-auto px-4 mt-4 print:hidden">
+        {!isAdmin && showLogin && (
+          <div className="bg-white p-4 rounded shadow mb-4">
+            <LoginPanel onLogin={(ok) => { if (ok) { setIsAdmin(true); setShowLogin(false); } }} />
+          </div>
+        )}
+        {isAdmin && (
+          <div className="bg-white p-4 rounded shadow mb-4">
+            <AdminPanel onLogout={() => { setIsAdmin(false); localStorage.removeItem('admin:logged'); }} />
+          </div>
+        )}
+        {!isAdmin && !showLogin && (
+          <div className="mb-2">
+            <button className="px-3 py-1 border" onClick={() => setShowLogin(true)}>Abrir login admin</button>
+          </div>
+        )}
+      </div>
 
       {/* HEADER IMPRESIÓN */}
       <div className="hidden print:block text-center pt-8 pb-4 border-b-2 border-gray-300 mb-6">

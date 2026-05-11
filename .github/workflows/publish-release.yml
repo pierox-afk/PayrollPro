@@ -1,0 +1,71 @@
+name: Publish Release Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.0)'
+        required: true
+      release_name:
+        description: 'Release name'
+        required: true
+      prerelease:
+        description: 'Mark as prerelease?'
+        required: false
+        default: 'false'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          npm ci
+
+      - name: Build frontend
+        run: |
+          npm run build:front
+
+      - name: Build electron (Windows)
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          # If signing secrets are set, electron-builder will sign; otherwise it will produce unsigned installer
+          npx electron-builder --win --x64 --publish never
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          release_name: ${{ github.event.inputs.release_name }}
+          draft: false
+          prerelease: ${{ github.event.inputs.prerelease }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installer to release
+        uses: actions/upload-release-asset@v2
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/payrollpro-desktop\\ Setup 1.0.0.exe
+          asset_name: payrollpro-desktop-setup.exe
+          asset_content_type: application/vnd.microsoft.portable-executable
+
+      - name: Upload other artifacts
+        uses: actions/upload-release-asset@v2
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: dist/*.AppImage
+          asset_name: payrollpro-desktop.AppImage
+          asset_content_type: application/octet-stream
