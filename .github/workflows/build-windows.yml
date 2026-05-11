@@ -1,0 +1,56 @@
+name: Build Windows desktop
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install backend and frontend deps
+        run: |
+          cd nomina && npm ci
+          cd ../nomina-front && npm ci
+
+      - name: Build frontend
+        run: |
+          cd nomina-front && npm run build
+
+      - name: Build Electron app (Windows)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # electron-builder will produce artifacts under dist/ or release/ depending on config
+          npm run build --if-present
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            dist/**
+            release/**
+            build/**
